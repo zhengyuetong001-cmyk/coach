@@ -473,7 +473,7 @@
     }
     .login-card h2 { margin-bottom: 8px; }
     .login-card .field { margin-top: 10px; }
-    body.locked .app { display: block; }
+    body.locked .app { display: none; }
     .stats-hero {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
@@ -1166,28 +1166,30 @@
     }
   </style>
 </head>
-<body>
+<body class="locked">
   <div class="page-bg" aria-hidden="true">
     <div class="bg-slide" style="background-image:url('assets/bsu-wbb-hero-1.jpg')"></div>
     <div class="bg-slide" style="background-image:url('assets/bsu-wbb-hero-2.jpg')"></div>
     <div class="bg-slide" style="background-image:url('assets/bsu-wbb-hero-3.jpg')"></div>
     <div class="bg-slide" style="background-image:url('assets/bsu-wbb-hero-4.jpg')"></div>
   </div>
-  <section class="login-view" id="loginView" style="display:none">
+  <section class="login-view" id="loginView">
     <div class="login-card">
       <div class="brand">
         <div class="logo">BSU</div>
         <div>
           <h2>教练工作台登录</h2>
-          <p class="note">账号云同步版：同一账号在手机和电脑登录后，数据会自动同步。</p>
+          <p class="note">手机号验证码登录：验证成功后进入教练工作台。</p>
         </div>
       </div>
-      <div class="field"><label>账号</label><input id="loginUser" autocomplete="username" placeholder="例如：coach"></div>
-      <div class="field"><label>密码</label><input id="loginPass" type="password" autocomplete="current-password" placeholder="首次输入会创建账号"></div>
+      <div class="field"><label>手机号</label><input id="phone" inputmode="tel" autocomplete="tel" placeholder="例如：+86138xxxxxxx"></div>
+      <div id="recaptcha-container" style="margin-top:12px"></div>
+      <div class="field"><label>短信验证码</label><input id="code" inputmode="numeric" autocomplete="one-time-code" placeholder="输入短信验证码"></div>
       <div class="actions">
-        <button class="btn primary" id="loginBtn" type="button" onclick="window.handleCoachLogin && window.handleCoachLogin()">登录 / 创建账号</button>
+        <button class="btn" id="sendCodeBtn" type="button">发送验证码</button>
+        <button class="btn primary" id="verifyCodeBtn" type="button">验证登录</button>
       </div>
-      <p class="note">提示：配置云端后，同一账号可跨设备同步；未配置云端时，只保存在当前浏览器。</p>
+      <p class="note">提示：手机号请带国家区号，例如中国手机号使用 +86 开头。</p>
     </div>
   </section>
   <div class="app">
@@ -4738,55 +4740,86 @@
     applyCustomMedia();
     renderAll();
   </script>
-<script>
-  // 👉 你原本的大量代码（不要动）
-</script>
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getAuth, RecaptchaVerifier, signInWithPhoneNumber, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-<!-- 👇 在这里加 Firebase -->
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getAuth, RecaptchaVerifier, signInWithPhoneNumber } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+    const firebaseConfig = {
+      apiKey: "AIzaSyDOedqMemxzBX2-gmLwJ1o1nBW6gXSnAkU",
+      authDomain: "coach-fd698.firebaseapp.com",
+      projectId: "coach-fd698",
+      appId: "1:651756953948:web:6b8fc6c98b7ae51c3d2199"
+    };
 
-const firebaseConfig = {
-  apiKey: "AIzaSyDOedqMemxzBX2-gmLwJ1o1nBW6gXSnAkU",
-  authDomain: "coach-fd698.firebaseapp.com",
-  projectId: "coach-fd698",
-  appId: "1:651756953948:web:6b8fc6c98b7ae51c3d2199"
-};
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    auth.languageCode = "zh-CN";
 
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
+    const loginView = document.getElementById("loginView");
+    const sendCodeBtn = document.getElementById("sendCodeBtn");
+    const verifyCodeBtn = document.getElementById("verifyCodeBtn");
 
-window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
-  size: 'normal'
-});
+    function showMessage(text) {
+      if (window.toast) window.toast(text);
+      else alert(text);
+    }
 
-window.sendCode = function () {
-  const phone = document.getElementById("phone").value;
-  signInWithPhoneNumber(auth, phone, window.recaptchaVerifier)
-    .then((confirmationResult) => {
-      window.confirmationResult = confirmationResult;
-      alert("验证码已发送");
+    function enterWorkbench() {
+      document.body.classList.remove("locked");
+      if (loginView) loginView.style.display = "none";
+    }
+
+    function ensureRecaptcha() {
+      if (window.recaptchaVerifier) return window.recaptchaVerifier;
+      window.recaptchaVerifier = new RecaptchaVerifier(auth, "recaptcha-container", {
+        size: "normal"
+      });
+      window.recaptchaVerifier.render();
+      return window.recaptchaVerifier;
+    }
+
+    onAuthStateChanged(auth, (user) => {
+      if (user) enterWorkbench();
     });
-};
 
-window.verifyCode = function () {
-  const code = document.getElementById("code").value;
-  confirmationResult.confirm(code)
-    .then(() => {
-      alert("登录成功！");
+    sendCodeBtn?.addEventListener("click", async () => {
+      const phone = document.getElementById("phone")?.value.trim();
+      if (!phone || !phone.startsWith("+")) return showMessage("请输入带国家区号的手机号，例如 +86138xxxxxxx");
+      sendCodeBtn.disabled = true;
+      sendCodeBtn.textContent = "发送中...";
+      try {
+        const verifier = ensureRecaptcha();
+        window.confirmationResult = await signInWithPhoneNumber(auth, phone, verifier);
+        showMessage("验证码已发送");
+      } catch (error) {
+        console.error(error);
+        showMessage("验证码发送失败，请检查 Firebase 设置和手机号格式");
+        window.recaptchaVerifier = null;
+        document.getElementById("recaptcha-container").innerHTML = "";
+      } finally {
+        sendCodeBtn.disabled = false;
+        sendCodeBtn.textContent = "发送验证码";
+      }
     });
-};
-</script>
 
-<!-- 👇 UI -->
-<div id="recaptcha-container"></div>
-
-<input id="phone" placeholder="+86138xxxxxxx">
-<button onclick="sendCode()">发送验证码</button>
-
-<input id="code" placeholder="验证码">
-<button onclick="verifyCode()">登录</button>
-
+    verifyCodeBtn?.addEventListener("click", async () => {
+      const code = document.getElementById("code")?.value.trim();
+      if (!code) return showMessage("请填写短信验证码");
+      if (!window.confirmationResult) return showMessage("请先发送验证码");
+      verifyCodeBtn.disabled = true;
+      verifyCodeBtn.textContent = "验证中...";
+      try {
+        await window.confirmationResult.confirm(code);
+        showMessage("登录成功");
+        enterWorkbench();
+      } catch (error) {
+        console.error(error);
+        showMessage("验证码不正确或已过期");
+      } finally {
+        verifyCodeBtn.disabled = false;
+        verifyCodeBtn.textContent = "验证登录";
+      }
+    });
+  </script>
 </body>
 </html>
