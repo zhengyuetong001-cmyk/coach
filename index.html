@@ -93,6 +93,18 @@
       cursor: pointer;
     }
     .side-profile > div:last-child, .tabs { opacity: 1; pointer-events: auto; transform: none; }
+    .side-tools {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .side-tools .btn {
+      min-height: 32px;
+      padding: 7px 10px;
+      font-size: 12px;
+    }
     .side-profile strong { display: block; font-size: 14px; }
     .side-profile span { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
     .main-shell { min-width: 0; padding: 0 18px 34px 86px; }
@@ -461,7 +473,7 @@
     }
     .login-card h2 { margin-bottom: 8px; }
     .login-card .field { margin-top: 10px; }
-    body.locked .app { display: none; }
+    body.locked .app { display: block; }
     .stats-hero {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
@@ -1154,29 +1166,28 @@
     }
   </style>
 </head>
-<body class="locked">
+<body>
   <div class="page-bg" aria-hidden="true">
     <div class="bg-slide" style="background-image:url('assets/bsu-wbb-hero-1.jpg')"></div>
     <div class="bg-slide" style="background-image:url('assets/bsu-wbb-hero-2.jpg')"></div>
     <div class="bg-slide" style="background-image:url('assets/bsu-wbb-hero-3.jpg')"></div>
     <div class="bg-slide" style="background-image:url('assets/bsu-wbb-hero-4.jpg')"></div>
   </div>
-  <section class="login-view" id="loginView">
+  <section class="login-view" id="loginView" style="display:none">
     <div class="login-card">
       <div class="brand">
         <div class="logo">BSU</div>
         <div>
           <h2>教练工作台登录</h2>
-          <p class="note">手机号验证码登录：同一手机号在不同设备登录后，数据会自动同步。</p>
+          <p class="note">账号云同步版：同一账号在手机和电脑登录后，数据会自动同步。</p>
         </div>
       </div>
-      <div class="field"><label>手机号</label><input id="loginPhone" inputmode="tel" placeholder="例如：+8613812345678"></div>
-      <div class="field"><label>短信验证码</label><input id="loginCode" inputmode="numeric" placeholder="收到短信后填写验证码"></div>
+      <div class="field"><label>账号</label><input id="loginUser" autocomplete="username" placeholder="例如：coach"></div>
+      <div class="field"><label>密码</label><input id="loginPass" type="password" autocomplete="current-password" placeholder="首次输入会创建账号"></div>
       <div class="actions">
-        <button class="btn" id="sendCodeBtn">发送验证码</button>
-        <button class="btn primary" id="loginBtn">验证登录</button>
+        <button class="btn primary" id="loginBtn" type="button" onclick="window.handleCoachLogin && window.handleCoachLogin()">登录 / 创建账号</button>
       </div>
-      <p class="note">提示：手机号请使用国际格式，例如中国手机号写 +86 开头。首次验证会自动创建云端账号。</p>
+      <p class="note">提示：配置云端后，同一账号可跨设备同步；未配置云端时，只保存在当前浏览器。</p>
     </div>
   </section>
   <div class="app">
@@ -1186,10 +1197,14 @@
         <div class="side-avatar"></div>
         <div><strong>BSU WBB</strong><span>Coach Workbench</span></div>
       </div>
+      <div class="side-tools">
+        <button class="btn" id="avatarBtn">换头像</button>
+        <button class="btn" id="coverBtn">换背景</button>
+      </div>
       <nav class="tabs">
         <button class="tab" data-page="entry">录入中心</button>
-        <button class="tab active" data-page="game">比赛数据</button>
         <button class="tab" data-page="training">训练计划</button>
+        <button class="tab active" data-page="game">比赛数据</button>
         <button class="tab" data-page="trainingData">训练数据</button>
         <button class="tab" data-page="players">球员档案</button>
       </nav>
@@ -1210,11 +1225,13 @@
         <div class="searchbar"><span>搜索</span><input id="globalSearch" placeholder="输入球员、训练主题或对手，自动筛选当前数据"></div>
         <div class="toolbar">
           <button class="btn primary" id="saveBtn">保存数据</button>
-          <button class="btn" id="exportBtn">导出备份</button>
-          <button class="btn" id="importBtn">导入备份</button>
-          <button class="btn danger" id="resetBtn">恢复示例</button>
-          <button class="btn" id="logoutBtn">退出登录</button>
-          <input class="hidden-file" id="importFile" type="file" accept="application/json">
+      <button class="btn" id="exportBtn">导出备份</button>
+      <button class="btn" id="importBtn">导入备份</button>
+      <button class="btn danger" id="resetBtn">恢复示例</button>
+      <button class="btn" id="logoutBtn">清除本机账号</button>
+      <input class="hidden-file" id="importFile" type="file" accept="application/json">
+      <input class="hidden-file" id="avatarFile" type="file" accept="image/*">
+      <input class="hidden-file" id="coverFile" type="file" accept="image/*">
         </div>
       </header>
 
@@ -2081,6 +2098,8 @@
     const sessionKey = "bsu-wbb-coach-session-v1";
     const sessionHashKey = "bsu-wbb-coach-session-hash-v1";
     const sessionUserIdKey = "bsu-wbb-coach-session-user-id-v1";
+    const avatarImageKey = "bsu-wbb-coach-avatar-image-v1";
+    const coverImageKey = "bsu-wbb-coach-cover-image-v1";
     const cloudConfig = {
       // 这里填 Supabase Project URL，例如：https://xxxx.supabase.co
       url: "",
@@ -2185,16 +2204,27 @@
       return supabaseClient;
     }
 
-    function normalizePhone(value) {
-      return String(value || "").replace(/\s+/g, "");
+    async function sha256(text) {
+      if (!window.crypto?.subtle) {
+        let h1 = 0xdeadbeef;
+        let h2 = 0x41c6ce57;
+        const value = String(text);
+        for (let i = 0; i < value.length; i += 1) {
+          const ch = value.charCodeAt(i);
+          h1 = Math.imul(h1 ^ ch, 2654435761);
+          h2 = Math.imul(h2 ^ ch, 1597334677);
+        }
+        h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+        h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+        return `${(h2 >>> 0).toString(16).padStart(8, "0")}${(h1 >>> 0).toString(16).padStart(8, "0")}`;
+      }
+      const bytes = new TextEncoder().encode(text);
+      const hash = await crypto.subtle.digest("SHA-256", bytes);
+      return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("");
     }
 
-    async function getCloudUser() {
-      const client = cloudClient();
-      if (!client) return null;
-      const { data, error } = await client.auth.getSession();
-      if (error) return null;
-      return data?.session?.user || null;
+    async function cloudUserId(username, passHash) {
+      return sha256(`${username}:${passHash}`);
     }
 
     async function fetchCloudRecordByUserId(userId) {
@@ -2209,23 +2239,22 @@
       return data || null;
     }
 
-    function rememberCloudUser(user) {
-      if (!user) return;
-      currentUserId = user.id;
-      currentUser = user.phone || currentUser || user.id;
-      currentPassHash = "phone-otp";
-      localStorage.setItem(sessionKey, currentUser);
-      localStorage.setItem(sessionHashKey, currentPassHash);
-      localStorage.setItem(sessionUserIdKey, currentUserId);
+    async function fetchCloudRecordByUsername(username) {
+      const client = cloudClient();
+      if (!client || !username) return null;
+      const { data, error } = await client
+        .from(cloudConfig.table)
+        .select("user_id,username,pass_hash,data,updated_at")
+        .eq("username", username)
+        .maybeSingle();
+      if (error) throw error;
+      return data || null;
     }
 
     async function loadCloudState(showToast = false) {
-      if (!cloudEnabled()) return false;
+      if (!cloudEnabled() || !currentUserId) return false;
       try {
-        const user = await getCloudUser();
-        if (!user) return false;
-        rememberCloudUser(user);
-        const record = await fetchCloudRecordByUserId(user.id);
+        const record = await fetchCloudRecordByUserId(currentUserId);
         if (!record || !record.data) return false;
         state = migrateState(record.data);
         localStorage.setItem(`${storageKey}-${currentUser}`, JSON.stringify(state));
@@ -2239,15 +2268,14 @@
     }
 
     async function saveCloudState(showToast = false) {
-      if (!cloudEnabled()) return;
+      if (!cloudEnabled() || !currentUser || !currentPassHash) return;
       try {
-        const user = await getCloudUser();
-        if (!user) return;
-        rememberCloudUser(user);
+        currentUserId = currentUserId || await cloudUserId(currentUser, currentPassHash);
+        localStorage.setItem(sessionUserIdKey, currentUserId);
         const payload = {
-          user_id: user.id,
-          username: user.phone || currentUser,
-          pass_hash: "phone-otp",
+          user_id: currentUserId,
+          username: currentUser,
+          pass_hash: currentPassHash,
           data: state,
           updated_at: new Date().toISOString()
         };
@@ -2317,43 +2345,104 @@
       byId("loginView").style.display = "none";
     }
 
-    async function setupLogin() {
-      const savedCloudUser = await getCloudUser();
-      if (savedCloudUser && !currentUser) {
-        rememberCloudUser(savedCloudUser);
+    function rememberAccount(username, passHash, userId = "") {
+      currentUser = username;
+      currentPassHash = passHash;
+      currentUserId = userId;
+      localStorage.setItem(sessionKey, currentUser);
+      localStorage.setItem(sessionHashKey, currentPassHash);
+      if (currentUserId) localStorage.setItem(sessionUserIdKey, currentUserId);
+      else localStorage.removeItem(sessionUserIdKey);
+    }
+
+    function withTimeout(promise, ms = 6000) {
+      return Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), ms))
+      ]);
+    }
+
+    let loginBusy = false;
+    let loginReady = false;
+
+    async function handleCoachLogin() {
+      if (loginBusy) return;
+      loginBusy = true;
+      const loginButton = byId("loginBtn");
+      const oldText = loginButton?.textContent || "";
+      if (loginButton) {
+        loginButton.disabled = true;
+        loginButton.textContent = "正在登录...";
       }
+      toast("正在登录...");
+      try {
+        const username = byId("loginUser").value.trim();
+        const password = byId("loginPass").value;
+        if (!username || !password) {
+          toast("请填写账号和密码");
+          return;
+        }
+        const passHash = await sha256(password);
+        try {
+          if (cloudEnabled()) {
+            const record = await withTimeout(fetchCloudRecordByUsername(username));
+            if (record && record.pass_hash !== passHash) {
+              toast("密码不正确");
+              return;
+            }
+            const userId = record?.user_id || await cloudUserId(username, passHash);
+            rememberAccount(username, passHash, userId);
+            const loaded = await withTimeout(loadCloudState(false));
+            if (!loaded) {
+              state = migrateState(loadState());
+              await withTimeout(saveCloudState(false));
+            }
+            renderAll();
+            unlockApp();
+            toast(record ? "已登录并同步云端数据" : "已创建云端账号");
+            return;
+          }
+        } catch {
+          toast("云端连接较慢，已改用本机登录");
+        }
+        const accounts = JSON.parse(localStorage.getItem(accountKey) || "{}");
+        if (accounts[username] && accounts[username] !== passHash) {
+          toast("密码不正确");
+          return;
+        }
+        accounts[username] = passHash;
+        localStorage.setItem(accountKey, JSON.stringify(accounts));
+        rememberAccount(username, passHash);
+        state = migrateState(loadState());
+        renderAll();
+        unlockApp();
+        if (!cloudEnabled()) toast("已本机登录：配置云端后可跨设备同步");
+      } catch {
+        toast("登录失败，请刷新页面后再试");
+      } finally {
+        loginBusy = false;
+        if (loginButton) {
+          loginButton.disabled = false;
+          loginButton.textContent = oldText || "登录 / 创建账号";
+        }
+      }
+    }
+
+    window.handleCoachLogin = handleCoachLogin;
+
+    async function setupLogin() {
+      if (loginReady) return;
+      loginReady = true;
       if (currentUser) {
         unlockApp();
         loadCloudState(false);
         return;
       }
-      byId("sendCodeBtn").addEventListener("click", async () => {
-        const phone = normalizePhone(byId("loginPhone").value);
-        if (!phone || !phone.startsWith("+")) return toast("请输入带国家区号的手机号，如 +8613812345678");
-        const client = cloudClient();
-        if (!client) return toast("请先配置 Supabase，才能发送短信验证码");
-        const { error } = await client.auth.signInWithOtp({ phone });
-        if (error) return toast("验证码发送失败，请检查手机号或Supabase短信设置");
-        toast("验证码已发送");
-      });
-      byId("loginBtn").addEventListener("click", async () => {
-        const phone = normalizePhone(byId("loginPhone").value);
-        const token = byId("loginCode").value.trim();
-        if (!phone || !token) return toast("请填写手机号和验证码");
-        if (!phone.startsWith("+")) return toast("手机号需要带国家区号，如 +86");
-        const client = cloudClient();
-        if (!client) return toast("请先配置 Supabase 手机号登录");
-        const { data, error } = await client.auth.verifyOtp({ phone, token, type: "sms" });
-        if (error || !data?.user) return toast("验证码不正确或已过期");
-        rememberCloudUser(data.user);
-        const loaded = await loadCloudState(false);
-        if (!loaded) {
-          state = migrateState(loadState());
-          await saveCloudState(false);
-        }
-        renderAll();
-        unlockApp();
-        toast(loaded ? "已登录并同步云端数据" : "已创建手机号云端账号");
+      byId("loginBtn")?.addEventListener("click", handleCoachLogin);
+      [byId("loginUser"), byId("loginPass")].filter(Boolean).forEach((input) => {
+        input.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") handleCoachLogin();
+        });
       });
     }
 
@@ -2405,6 +2494,59 @@
           apply();
           toast(input.value.trim() ? "已按关键词筛选当前数据" : "已清空搜索");
         }
+      });
+    }
+
+    function setBackgroundImage(nodes, imageUrl) {
+      nodes.forEach((node, index) => {
+        node.style.backgroundImage = `url("${imageUrl}")`;
+        node.style.backgroundPosition = index === 0 ? "center 38%" : "center";
+      });
+    }
+
+    function applyCustomMedia() {
+      const avatar = localStorage.getItem(avatarImageKey);
+      const cover = localStorage.getItem(coverImageKey);
+      if (avatar) {
+        setBackgroundImage([
+          ...document.querySelectorAll(".cover-avatar, .side-avatar, .nav-fab")
+        ], avatar);
+      }
+      if (cover) {
+        setBackgroundImage([
+          ...document.querySelectorAll(".cover-slide, .hero-slide, .bg-slide")
+        ], cover);
+      }
+    }
+
+    function readImageToStorage(file, key, onDone) {
+      if (!file || !file.type.startsWith("image/")) return toast("请选择图片文件");
+      if (file.size > 4 * 1024 * 1024) return toast("图片请控制在4MB以内");
+      const reader = new FileReader();
+      reader.onload = () => {
+        localStorage.setItem(key, reader.result);
+        onDone();
+      };
+      reader.onerror = () => toast("图片读取失败，请换一张试试");
+      reader.readAsDataURL(file);
+    }
+
+    function setupMediaControls() {
+      byId("avatarBtn")?.addEventListener("click", () => byId("avatarFile").click());
+      byId("coverBtn")?.addEventListener("click", () => byId("coverFile").click());
+      byId("avatarFile")?.addEventListener("change", (event) => {
+        readImageToStorage(event.target.files[0], avatarImageKey, () => {
+          applyCustomMedia();
+          toast("头像已更新");
+          event.target.value = "";
+        });
+      });
+      byId("coverFile")?.addEventListener("change", (event) => {
+        readImageToStorage(event.target.files[0], coverImageKey, () => {
+          applyCustomMedia();
+          toast("背景已更新");
+          event.target.value = "";
+        });
       });
     }
 
@@ -4591,12 +4733,60 @@
     window.addEventListener("resize", () => requestAnimationFrame(renderCharts));
 
     setupSideNav();
+    setupMediaControls();
     setupGlobalSearch();
-    setupLogin();
+    applyCustomMedia();
     renderAll();
   </script>
+<script>
+  // 👉 你原本的大量代码（不要动）
+</script>
+
+<!-- 👇 在这里加 Firebase -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, RecaptchaVerifier, signInWithPhoneNumber } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDOedqMemxzBX2-gmLwJ1o1nBW6gXSnAkU",
+  authDomain: "coach-fd698.firebaseapp.com",
+  projectId: "coach-fd698",
+  appId: "1:651756953948:web:6b8fc6c98b7ae51c3d2199"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+
+window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+  size: 'normal'
+});
+
+window.sendCode = function () {
+  const phone = document.getElementById("phone").value;
+  signInWithPhoneNumber(auth, phone, window.recaptchaVerifier)
+    .then((confirmationResult) => {
+      window.confirmationResult = confirmationResult;
+      alert("验证码已发送");
+    });
+};
+
+window.verifyCode = function () {
+  const code = document.getElementById("code").value;
+  confirmationResult.confirm(code)
+    .then(() => {
+      alert("登录成功！");
+    });
+};
+</script>
+
+<!-- 👇 UI -->
+<div id="recaptcha-container"></div>
+
+<input id="phone" placeholder="+86138xxxxxxx">
+<button onclick="sendCode()">发送验证码</button>
+
+<input id="code" placeholder="验证码">
+<button onclick="verifyCode()">登录</button>
+
 </body>
 </html>
-
-
-
