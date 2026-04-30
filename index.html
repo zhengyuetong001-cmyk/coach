@@ -2077,6 +2077,14 @@
     const storageKey = "bsu-wbb-coach-workbench-v1";
     const accountKey = "bsu-wbb-coach-accounts-v1";
     const sessionKey = "bsu-wbb-coach-session-v1";
+    const sessionHashKey = "bsu-wbb-coach-session-hash-v1";
+    const cloudConfig = {
+      // 这里填 Supabase Project URL，例如：https://xxxx.supabase.co
+      url: "",
+      // 这里填 Supabase anon public key
+      anonKey: "",
+      table: "bsu_wbb_workbench"
+    };
     const radarLabels = ["得分", "效率", "投篮", "三分", "罚球", "篮板", "组织", "防守"];
     const trainingMetricLabels = [
       { key: "points", label: "PTS" },
@@ -2140,6 +2148,7 @@
     };
 
     let currentUser = localStorage.getItem(sessionKey) || "";
+    let currentPassHash = localStorage.getItem(sessionHashKey) || "";
     let state = migrateState(loadState());
     let playerStatsSort = { key: "points", dir: -1 };
     let teamStatsSort = { key: "date", dir: -1 };
@@ -2154,6 +2163,81 @@
         return saved ? JSON.parse(saved) : structuredClone(exampleState);
       } catch {
         return structuredClone(exampleState);
+      }
+    }
+
+    function cloudEnabled() {
+      return Boolean(cloudConfig.url && cloudConfig.anonKey && cloudConfig.url.startsWith("https://"));
+    }
+
+    async function sha256(text) {
+      const bytes = new TextEncoder().encode(text);
+      const hash = await crypto.subtle.digest("SHA-256", bytes);
+      return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("");
+    }
+
+    function cloudEndpoint(query = "") {
+      return `${cloudConfig.url.replace(/\/$/, "")}/rest/v1/${cloudConfig.table}${query}`;
+    }
+
+    function cloudHeaders(extra = {}) {
+      return {
+        apikey: cloudConfig.anonKey,
+        Authorization: `Bearer ${cloudConfig.anonKey}`,
+        "Content-Type": "application/json",
+        ...extra
+      };
+    }
+
+    async function cloudUserId(username, passHash) {
+      return sha256(`${username}:${passHash}`);
+    }
+
+    async function fetchCloudRecord(username) {
+      if (!cloudEnabled() || !username) return null;
+      const url = cloudEndpoint(`?username=eq.${encodeURIComponent(username)}&select=user_id,username,pass_hash,data,updated_at&limit=1`);
+      const response = await fetch(url, { headers: cloudHeaders() });
+      if (!response.ok) throw new Error("cloud fetch failed");
+      const rows = await response.json();
+      return rows[0] || null;
+    }
+
+    async function loadCloudState(showToast = false) {
+      if (!cloudEnabled() || !currentUser || !currentPassHash) return false;
+      try {
+        const record = await fetchCloudRecord(currentUser);
+        if (!record || record.pass_hash !== currentPassHash || !record.data) return false;
+        state = migrateState(record.data);
+        localStorage.setItem(`${storageKey}-${currentUser}`, JSON.stringify(state));
+        renderAll();
+        if (showToast) toast("已从云端同步数据");
+        return true;
+      } catch {
+        if (showToast) toast("云端同步失败，已使用本机数据");
+        return false;
+      }
+    }
+
+    async function saveCloudState(showToast = false) {
+      if (!cloudEnabled() || !currentUser || !currentPassHash) return;
+      try {
+        const userId = await cloudUserId(currentUser, currentPassHash);
+        const payload = {
+          user_id: userId,
+          username: currentUser,
+          pass_hash: currentPassHash,
+          data: state,
+          updated_at: new Date().toISOString()
+        };
+        const response = await fetch(cloudEndpoint(), {
+          method: "POST",
+          headers: cloudHeaders({ Prefer: "resolution=merge-duplicates" }),
+          body: JSON.stringify(payload)
+        });
+        if (!response.ok) throw new Error("cloud save failed");
+        if (showToast) toast("数据已保存到云端");
+      } catch {
+        if (showToast) toast("云端保存失败，已保存到本机");
       }
     }
 
@@ -2199,7 +2283,8 @@
       state.weekPlanText = document.getElementById("weekPlanText")?.value || state.weekPlanText;
       state.monthPlanText = document.getElementById("monthPlanText")?.value || state.monthPlanText;
       localStorage.setItem(currentUser ? `${storageKey}-${currentUser}` : storageKey, JSON.stringify(state));
-      if (show) toast("数据已保存到本机浏览器");
+      saveCloudState(show);
+      if (show && !cloudEnabled()) toast("数据已保存到本机浏览器");
     }
 
     function toast(text) {
@@ -2217,18 +2302,49 @@
     function setupLogin() {
       if (currentUser) {
         unlockApp();
+        loadCloudState(false);
         return;
       }
-      byId("loginBtn").addEventListener("click", () => {
+      byId("loginBtn").addEventListener("click", async () => {
         const user = byId("loginUser").value.trim();
         const pass = byId("loginPass").value;
         if (!user || !pass) return toast("请填写账号和密码");
+        const passHash = await sha256(pass);
+        if (cloudEnabled()) {
+          try {
+            const record = await fetchCloudRecord(user);
+            if (record && record.pass_hash !== passHash) return toast("密码不正确");
+            currentUser = user;
+            currentPassHash = passHash;
+            localStorage.setItem(sessionKey, user);
+            localStorage.setItem(sessionHashKey, passHash);
+            const accounts = JSON.parse(localStorage.getItem(accountKey) || "{}");
+            accounts[user] = passHash;
+            localStorage.setItem(accountKey, JSON.stringify(accounts));
+            if (record?.data) {
+              state = migrateState(record.data);
+              localStorage.setItem(`${storageKey}-${currentUser}`, JSON.stringify(state));
+              toast("已从云端登录并同步");
+            } else {
+              state = migrateState(loadState());
+              await saveCloudState(false);
+              toast("已创建云端账号");
+            }
+            renderAll();
+            unlockApp();
+            return;
+          } catch {
+            toast("云端连接失败，已改用本机登录");
+          }
+        }
         const accounts = JSON.parse(localStorage.getItem(accountKey) || "{}");
-        if (accounts[user] && accounts[user] !== pass) return toast("密码不正确");
-        accounts[user] = pass;
+        if (accounts[user] && accounts[user] !== pass && accounts[user] !== passHash) return toast("密码不正确");
+        accounts[user] = passHash;
         localStorage.setItem(accountKey, JSON.stringify(accounts));
         localStorage.setItem(sessionKey, user);
+        localStorage.setItem(sessionHashKey, passHash);
         currentUser = user;
+        currentPassHash = passHash;
         state = migrateState(loadState());
         renderAll();
         unlockApp();
@@ -4365,6 +4481,7 @@
     byId("logoutBtn").addEventListener("click", () => {
       saveState(false);
       localStorage.removeItem(sessionKey);
+      localStorage.removeItem(sessionHashKey);
       location.reload();
     });
     byId("addMatchBtn").addEventListener("click", addMatch);
