@@ -122,6 +122,7 @@ input {
 <body>
 
 <h2>🏀 比赛进攻记录</h2>
+<div class="record">当前版本：GitHub上传版 2026-05-14｜防守标记在节次下方，丢篮板/防守愣神均可选球员后直接记录。</div>
 
 <div class="box coach">
   <b>教练看板：10秒决策</b>
@@ -606,23 +607,6 @@ function addVideoMarker(){
   renderRecords();
   document.getElementById("lostRunInput").value = "";
   document.getElementById("efficientInput").value = "";
-}
-
-function addSimpleMarker(label){
-  if(!quarter){
-    alert("请先选择第几节");
-    return;
-  }
-
-  records.unshift({
-    type: "marker",
-    time: new Date().toLocaleTimeString(),
-    quarter,
-    label
-  });
-
-  saveData();
-  renderRecords();
 }
 
 function showMarkerPlayerPicker(label){
